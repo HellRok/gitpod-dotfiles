@@ -1,0 +1,11 @@
+# backticks to display information in the statusbar
+backtick 1 0 0 /home/gitpod/.dotfiles/bin/system_info
+
+startup_message off
+termcapinfo xterm 'bc@:bs@'
+defutf8 on
+defencoding utf8
+defbce on
+
+hardstatus alwayslastline
+hardstatus string '%{= kG}%{g}[%= %{= kw}%?%-Lw%?%{r}(%{W}%n*%f%t%?(%u)%?%{r})%{w}%?%+Lw%?%?%= %{g}]%{ky}%1`'

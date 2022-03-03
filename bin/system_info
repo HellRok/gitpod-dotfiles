@@ -1,0 +1,138 @@
+#!/usr/bin/env ruby
+
+bars = %W(▁ ▂ ▃ ▄ ▅ ▆ ▇ █)
+
+cpu_text = 'C:'
+cpu_display = :average # Use :bars if you want it fancy
+#cpu_display = :bars # Use :bars if you want it fancy
+
+memory_text = 'M:'
+memory_display = :percentage
+
+swap_text = 'S:'
+swap_display = nil
+
+display_join = ' '
+refresh_interval = 1
+
+class MemoryInfo
+  attr_reader :total, :used, :free, :shared, :buff_cache, :available
+  def initialize(line)
+    info = line.split
+    @total      = Integer info[1]
+    @used       = Integer info[2]
+    @free       = Integer info[3]
+    @shared     = Integer info[4]
+    @buff_cache = Integer info[5]
+    @available  = Integer info[6]
+  end
+
+  def current_usable
+    @total - @available
+  end
+end
+
+class SwapInfo
+  attr_reader :total, :used, :free
+  def initialize(line)
+    info = line.split
+    @total      = Integer info[1]
+    @used       = Integer info[2]
+    @free       = Integer info[3]
+  end
+end
+
+class CPUInfo
+  attr_reader :user, :nice, :system, :idle, :iowait, :irq, :softirq, :steal, :guest, :guest_nice
+  def initialize(line)
+    info = line.split
+    @user       = Integer info[1]
+    @nice       = Integer info[2]
+    @system     = Integer info[3]
+    @idle       = Integer info[4]
+    @iowait     = Integer info[5]
+    @irq        = Integer info[6]
+    @softirq    = Integer info[7]
+    @steal      = Integer info[8]
+    # These can be zero on non-existent system
+    @guest      = info[9].to_i
+    @guest_nice = info[10].to_i
+  end
+
+  def usage_since(old_cpu_info)
+    diff_idle = @idle - old_cpu_info.idle
+
+    return 0 if diff_total(old_cpu_info) + diff_idle == 0
+
+    diff_total(old_cpu_info) / (diff_total(old_cpu_info) + diff_idle).to_f * 100.0
+  end
+
+  def diff_total(old_cpu_info)
+    diff_user = @user - old_cpu_info.user
+    diff_nice = @nice - old_cpu_info.nice
+    diff_system = @system - old_cpu_info.system
+    diff_iowait = @iowait - old_cpu_info.iowait
+    diff_irq = @irq - old_cpu_info.irq
+    diff_softirq = @softirq - old_cpu_info.softirq
+    diff_steal = @steal - old_cpu_info.steal
+    diff_guest = @guest - old_cpu_info.guest
+    diff_guest_nice = @guest_nice - old_cpu_info.guest_nice
+    (diff_user + diff_system + diff_nice + diff_iowait + diff_irq + diff_softirq + diff_steal + diff_guest + diff_guest_nice).to_f
+  end
+end
+
+cores = []
+current_cpu_percentages = []
+loop do
+  display = []
+
+  `cat /proc/stat`.lines.each do |line|
+    next unless line =~ /^cpu\d/
+    core_index = Integer /^cpu(\d+)/.match(line)[1]
+
+    new_core = CPUInfo.new(line)
+    old_core = cores[core_index] || new_core # Bootstrap to 0%
+    current_cpu_percentages[core_index] = new_core.usage_since(old_core)
+    cores[core_index] = new_core
+  end
+
+  free_output = `/usr/bin/free -m`.lines
+  memory_info = MemoryInfo.new(free_output[1])
+  swap_info = if free_output.size == 3
+                SwapInfo.new(free_output[2])
+              else
+                SwapInfo.new(free_output[3])
+              end
+
+  case memory_display
+  when :percentage
+    display << "#{memory_text}#{(memory_info.current_usable.to_f / memory_info.total * 100).floor.to_s.rjust(3, ' ')}%"
+    #display << "#{cpu_text}#{average.to_s.rjust(5, ' ')}%"
+  when :used_out_of_available
+    display << "#{memory_text}#{(memory_info.current_usable / 1024.0).round(1)}GB/#{(memory_info.total / 1024.0).round(1)}GB"
+  end
+
+  case swap_display
+  when :percentage
+    display << "#{swap_text}#{(swap_info.used.to_f / swap_info.total).round(1)}"
+  when :used_out_of_available
+    display << "#{swap_text}#{(swap_info.used / 1024.0).round(1)}GB/#{(swap_info.total / 1024.0).round(1)}GB"
+  end
+
+  average = ((current_cpu_percentages.inject(:+).to_f / current_cpu_percentages.size) * 10).floor / 10.0
+  # TODO: The bar characters I want to use don't work thanks to this screen bug:
+  #       http://savannah.gnu.org/bugs/?36172
+  case cpu_display
+  when :bars
+    cpu_bars = current_cpu_percentages.map { |percentage|
+      index = [percentage / (100 / bars.length).ceil, (bars.length - 1)].min
+      bars[index]
+    }
+    display << "#{cpu_text}[#{cpu_bars.join}]#{average.to_s.rjust(5, ' ')}%"
+  when :average
+    display << "#{cpu_text}#{average.floor.to_s.rjust(3, ' ')}%"
+  end
+
+  puts display.join(display_join)
+  sleep refresh_interval
+end
