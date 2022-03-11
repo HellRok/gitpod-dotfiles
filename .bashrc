@@ -22,6 +22,10 @@ HISTFILESIZE=2000
 # update the values of LINES and COLUMNS.
 shopt -s checkwinsize
 
+# GITPOD STUFF
+
+for f in ~/.bashrc.d/*; do source $f; done
+
 # CUSTOM BASHRC STUFF
 
 if [[ -s /usr/share/bash-completion/bash_completion ]]; then
